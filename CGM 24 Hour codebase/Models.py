@@ -5,6 +5,138 @@ from vit_pytorch import ViT
 import torch.nn as nn
 import torch
 
+
+import torch
+import torch.nn as nn
+import math
+
+class MultiChannelTransformerEncoder(nn.Module):
+    def __init__(
+        self,
+        n_features,          # Sequence length (1440 in your case)
+        n_channels=5,        # Number of input channels (5 in your case)
+        embed_dim=96,        # Embedding dimension
+        num_heads=2,         # Number of attention heads
+        num_classes=64,      # Output dimension
+        dropout=0.2,         # Dropout rate
+        num_layers=6,        # Number of transformer layers
+        use_pos_emb=True,    # Whether to use positional embedding
+        activation=nn.GELU(), # Activation function
+    ):
+        super().__init__()
+        self.use_pos_emb = use_pos_emb
+        self.n_channels = n_channels
+        
+        # Channel projection layer: maps each channel to embed_dim
+        self.channel_proj = nn.Conv1d(n_channels, embed_dim, kernel_size=1)
+        
+        # Transformer encoder
+        self.attn = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=embed_dim,
+                nhead=num_heads,
+                batch_first=True,
+                dropout=dropout,
+                activation=activation,
+            ),
+            num_layers,
+        )
+        
+        # Positional encoding
+        self.register_buffer(
+            "position_vec",
+            torch.tensor(
+                [
+                    math.pow(10000.0, 2.0 * (i // 2) / embed_dim)
+                    for i in range(embed_dim)
+                ],
+            ),
+        )
+        
+        # Output projection
+        self.linear = nn.Linear(embed_dim, num_classes)
+        
+    def temporal_enc(self, time, non_pad_mask):
+        """
+        Input: batch*seq_len.
+        Output: batch*seq_len*d_model.
+        """
+        result = time[:, None] / self.position_vec[None, :, None]
+        result[:, :, 0::2] = torch.sin(result[:, :, 0::2])
+        result[:, :, 1::2] = torch.cos(result[:, :, 1::2])
+        return result * non_pad_mask[:, None]
+        
+    def forward(self, x, lens=None, t=None):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, n_channels, seq_len]
+                (or [batch_size, seq_len, n_channels] if transpose_input=True)
+            lens: Optional sequence lengths (not used in current implementation)
+            t: Optional time values for positional encoding
+        """
+        batch_size, n_channels, seq_len = x.shape
+        
+        # Handle masking if needed
+        # Creating a mask for padding values if present
+        mask = None
+        if torch.isinf(x).any():
+            mask = torch.any(x == float("inf"), dim=1)
+            x = x.clone()
+            x[torch.isinf(x)] = 0.0
+        
+        # Project channels to embedding dimension
+        # Input: [batch_size, n_channels, seq_len]
+        # Output: [batch_size, embed_dim, seq_len]
+        z = self.channel_proj(x)
+        
+        # Transpose to [batch_size, seq_len, embed_dim] for transformer
+        z = z.permute(0, 2, 1)
+        
+        # Apply positional encoding if specified
+        if self.use_pos_emb and t is not None:
+            non_pad_mask = ~mask if mask is not None else torch.ones(batch_size, seq_len, device=x.device)
+            tem_enc = self.temporal_enc(t, non_pad_mask)
+            z = z + tem_enc
+        
+        # Pass through transformer
+        # Input: [batch_size, seq_len, embed_dim]
+        # Output: [batch_size, seq_len, embed_dim]
+        z = self.attn(z, src_key_padding_mask=mask)
+        
+        # Average pooling across sequence length
+        # Output: [batch_size, embed_dim]
+        z_pooled = z.mean(dim=1)
+        
+        # Project to output dimension
+        # Output: [batch_size, num_classes]
+        output = self.linear(z_pooled)
+        
+        return output
+
+
+
+
+class Regressor(nn.Module):
+    def __init__(self, input_size=64, hidden=128, output_size=1, dropout=0.2):
+        super().__init__()
+        self.layer1 = nn.Linear(input_size, hidden)
+        self.layer2 = nn.Linear(hidden, hidden)
+        self.layer3 = nn.Linear(hidden, output_size)
+        self.act = nn.ReLU()
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.dropout(x)
+        x = self.act(x)
+        x = self.layer2(x)
+        x = self.dropout(x)
+        x = self.act(x)
+        x = self.layer3(x)
+        return x
+
+
+
 class ImageSetTransformer(nn.Module):
     def __init__(self, input_dim, hidden_dim=128, num_heads=4, num_layers=2, dropout=0.1):
         super(ImageSetTransformer, self).__init__()

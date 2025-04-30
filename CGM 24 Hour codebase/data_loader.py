@@ -1,14 +1,15 @@
 import pandas as pd
 import os, pdb, copy
 import numpy as np
-from torch.utils.data import Dataset
 import torch
 from sklearn.model_selection import train_test_split
 import cv2
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-from scipy.stats import pearsonr
+
 import numpy as np
+
+from data_types import DailyTracesDataset , SubjectDaySubset
+
 
 
 
@@ -421,4 +422,74 @@ def process_multiple_subjects(
         summary['total_meals'] += sum(len(meals) for meals in nutrition.values())
     return summary
 
+
+def split_dataset_by_subject_day(dataset, test_size=0.2, random_state=2025):
+    """
+    Split the dataset based on subject-day pairs to ensure all data from
+    the same subject and day stays together in either training or testing set.
+    
+    Args:
+        dataset (DailyTracesDataset): The dataset to split
+        test_size (float): Proportion of data to use for testing
+        random_state (int): Random seed for reproducibility
+    
+    Returns:
+        tuple: (train_indices, test_indices)
+    """
+    # Get unique subject-day pairs
+    subject_day_df = pd.DataFrame(dataset.subject_day_pairs, columns=['subject_id', 'day_id'])
+    unique_pairs = subject_day_df.drop_duplicates()
+    
+    # Split the unique subject-day pairs
+    train_pairs, test_pairs = train_test_split(
+        unique_pairs, 
+        test_size=test_size,
+        random_state=random_state
+    )
+    
+    # Convert to sets for faster lookup
+    train_pairs_set = set(zip(train_pairs['subject_id'], train_pairs['day_id']))
+    test_pairs_set = set(zip(test_pairs['subject_id'], test_pairs['day_id']))
+    
+    # Create masks for train and test indices
+    train_indices = []
+    test_indices = []
+    
+    for i, (subject_id, day_id) in enumerate(dataset.subject_day_pairs):
+        if (subject_id, day_id) in train_pairs_set:
+            train_indices.append(i)
+        elif (subject_id, day_id) in test_pairs_set:
+            test_indices.append(i)
+    
+    return train_indices, test_indices
+
+def get_train_test_datasets(data_dir, subject_ids=None, test_size=0.2, random_state=2025, transform=None):
+    """
+    Get train and test datasets split by subject-day pairs.
+    
+    Args:
+        data_dir (str): Directory containing processed data
+        subject_ids (list): List of subject IDs to include. If None, include all available.
+        test_size (float): Proportion of data to use for testing
+        random_state (int): Random seed for reproducibility
+        transform (callable): Optional transform to apply to the data
+    
+    Returns:
+        tuple: (train_dataset, test_dataset)
+    """
+    # Create the full dataset
+    full_dataset = DailyTracesDataset(data_dir, subject_ids, transform)
+    
+    # Split by subject-day pairs
+    train_indices, test_indices = split_dataset_by_subject_day(full_dataset, test_size, random_state)
+    
+    # Create train and test subsets
+    train_dataset = SubjectDaySubset(full_dataset, train_indices)
+    test_dataset = SubjectDaySubset(full_dataset, test_indices)
+    
+    print(f"Full dataset size: {len(full_dataset)}")
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Test dataset size: {len(test_dataset)}")
+    
+    return train_dataset, test_dataset
 
