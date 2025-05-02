@@ -4,21 +4,21 @@ from torch.utils.data import DataLoader
 from Models import MultiheadAttention as TransformerEncoder, ImageEncoder, ImageSetTransformer,MultiChannelTransformerEncoder,Regressor
 from training_scripts import train_model_all_modalities
 
-summary = process_multiple_subjects(
-    subject_ids=range(1, 50),  # Process subjects 1-49
-    csv_dir="CGMacros-2",  # Path to your CSV files
-    save_dir="processed_data/",  # Where to save processed data
-    cgm_cols=["Dexcom GL", "Libre GL"],
-    activity_cols=["HR","METs"],
-    img_size=(112, 112),
-    start_hour=6  # New parameter: starting hour (6 AM)
-)
+# summary = process_multiple_subjects(
+#     subject_ids=range(1, 50),  # Process subjects 1-49
+#     csv_dir="CGMacros-2",  # Path to your CSV files
+#     save_dir="processed_data/",  # Where to save processed data
+#     cgm_cols=["Dexcom GL", "Libre GL"],
+#     activity_cols=["HR","METs"],
+#     img_size=(112, 112),
+#     start_hour=6  # New parameter: starting hour (6 AM)
+# )
 
-print(f"Processing summary:")
-print(f"- Processed {len(summary['processed_subjects'])} subjects")
-print(f"- Total days: {summary['total_days']}")
-print(f"- Total images: {summary['total_images']}")
-print(f"- Total meals: {summary['total_meals']}")  # Added meal count
+# print(f"Processing summary:")
+# print(f"- Processed {len(summary['processed_subjects'])} subjects")
+# print(f"- Total days: {summary['total_days']}")
+# print(f"- Total images: {summary['total_images']}")
+# print(f"- Total meals: {summary['total_meals']}")  # Added meal count
 
 #Step 2: Create train and test datasets from the processed data
 train_dataset, test_dataset = get_train_test_datasets(
@@ -49,7 +49,6 @@ test_loader = DataLoader(
     num_workers=0,
     collate_fn=custom_collate
 )
-
 
 image_encoder = ImageEncoder(
     image_size=224,  # Standard input size for many vision models
@@ -88,21 +87,25 @@ regressor = Regressor(
 )
 set_transformer = ImageSetTransformer(input_dim=32, hidden_dim=128, num_heads=4, num_layers=2, dropout=0.1)
 
-
+for batch in train_loader:
+    print(batch['cgm_data'].shape)
+    print(batch['activity_data'].shape)
+    print(batch['meal_timing_features'].shape)
+    break
 # Create the final model
 #training_losses, validation_losses,pearson,_,_ = train_model(activity_encoder,cgm_encoder,meal_time_encoder,regressor,train_loader,test_loader,0,1,epochs=30,lr=1e-4)
 
-training_losses, validation_losses, pearson = train_model_all_modalities(
-        activity_encoder=activity_encoder,
-        cgm_encoder=cgm_encoder,
-        meal_time_encoder=meal_time_encoder,
-        image_encoder=image_encoder,
-        image_set_model=set_transformer,
-        regressor=regressor,
-        train_loader=train_loader,
-        val_loader=test_loader,
-        global_mean=0,
-        global_std=1,
-        epochs=10,
-        lr=1e-4
-    )
+# training_losses, validation_losses, pearson = train_model_all_modalities(
+#         activity_encoder=activity_encoder,
+#         cgm_encoder=cgm_encoder,
+#         meal_time_encoder=meal_time_encoder,
+#         image_encoder=image_encoder,
+#         image_set_model=set_transformer,
+#         regressor=regressor,
+#         train_loader=train_loader,
+#         val_loader=test_loader,
+#         global_mean=0,
+#         global_std=1,
+#         epochs=10,
+#         lr=1e-4
+#     )

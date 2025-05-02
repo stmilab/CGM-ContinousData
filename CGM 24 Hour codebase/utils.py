@@ -38,10 +38,12 @@ def custom_collate(batch):
         'nutrition': [x['nutrition'] for x in batch],  # List of lists
         'subject_day_pairs': [x['subject_day_pair'] for x in batch],
         'timestamps': [x.get('timestamps', []) for x in batch],  # New: timestamps for each data point
-        'meal_timing_features': [torch.tensor(x.get('meal_timing_features', np.zeros((5, 1))), 
-                                              dtype=torch.float32) if len(x.get('meal_timing_features', [])) > 0 
-                                 else torch.zeros((5, 1)) for x in batch],  # New: meal timing features,
-        'demographics': torch.stack([x['demographics'] for x in batch])
+        'meal_timing_features': torch.stack([ torch.tensor(x.get('meal_timing_features', np.zeros((5, 1))), dtype=torch.float32)
+             if len(x.get('meal_timing_features', [])) > 0 else torch.zeros((5, 1))
+            ]),
+        'demographics': torch.stack([x['demographics'] for x in batch]),
+        'intensity_minute':[x['minute_intensity'] for x in batch],
+        'intensity_hour':[x['hourly_intensity'] for x in batch]
     }
 
 
@@ -125,7 +127,7 @@ def filter_samples_by_nutrition(dataset):
     - Non-zero total calories
     - Total calories >= 300
     """
-    valid_meals = {"breakfast", "lunch", "dinner"}
+    valid_meals = {"breakfast", "lunch", "dinner","snack","snacks"}
     filtered = []
     
     for sample in dataset:
