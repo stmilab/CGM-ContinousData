@@ -2,13 +2,75 @@ import torch
 import torch.nn as nn
 import math
 from vit_pytorch import ViT
-import torch.nn as nn
-import torch
+import torch.nn.functional as F
 
+class IntensityCNN(nn.Module):
+    def __init__(self, output_dim=128):
+        super(IntensityCNN, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),  # (B, 32, 128, 128)
+            nn.ReLU(),
+            nn.MaxPool2d(2),                                       # (B, 32, 64, 64)
 
-import torch
-import torch.nn as nn
-import math
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),           # (B, 64, 64, 64)
+            nn.ReLU(),
+            nn.MaxPool2d(2),                                       # (B, 64, 32, 32)
+
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),          # (B, 128, 32, 32)
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1)),                          # (B, 128, 1, 1)
+        )
+
+        self.fc = nn.Linear(128, output_dim)  # Final embedding vector
+
+    def forward(self, x):
+        x = self.encoder(x)          # (B, 128, 1, 1)
+        x = x.view(x.size(0), -1)    # Flatten to (B, 128)
+        x = self.fc(x)               # Optional projection to output_dim
+        return x
+
+class ImprovedRegressor(nn.Module):
+    """
+    An improved regressor with residual connections and regularization.
+    """
+    def __init__(self, input_size, hidden_size=256, output_size=1, dropout=0.3):
+        super(ImprovedRegressor, self).__init__()
+        
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.bn1 = nn.BatchNorm1d(hidden_size)
+        self.dropout1 = nn.Dropout(dropout)
+        
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.bn2 = nn.BatchNorm1d(hidden_size)
+        self.dropout2 = nn.Dropout(dropout)
+        
+        # Residual connection adapter
+        self.res_adapter = nn.Linear(input_size, hidden_size) if input_size != hidden_size else nn.Identity()
+        
+        self.fc3 = nn.Linear(hidden_size, hidden_size // 2)
+        self.bn3 = nn.BatchNorm1d(hidden_size // 2)
+        self.dropout3 = nn.Dropout(dropout)
+        
+        self.fc4 = nn.Linear(hidden_size // 2, output_size)
+        
+    def forward(self, x):
+        # First layer
+        residual = self.res_adapter(x)
+        x = F.relu(self.bn1(self.fc1(x)))
+        x = self.dropout1(x)
+        
+        # Second layer with residual connection
+        x = F.relu(self.bn2(self.fc2(x))) + residual
+        x = self.dropout2(x)
+        
+        # Third layer
+        x = F.relu(self.bn3(self.fc3(x)))
+        x = self.dropout3(x)
+        
+        # Output layer
+        x = self.fc4(x)
+        
+        return x
 
 class MultiChannelTransformerEncoder(nn.Module):
     def __init__(

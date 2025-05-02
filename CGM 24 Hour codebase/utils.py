@@ -38,12 +38,12 @@ def custom_collate(batch):
         'nutrition': [x['nutrition'] for x in batch],  # List of lists
         'subject_day_pairs': [x['subject_day_pair'] for x in batch],
         'timestamps': [x.get('timestamps', []) for x in batch],  # New: timestamps for each data point
-        'meal_timing_features': torch.stack([ torch.tensor(x.get('meal_timing_features', np.zeros((5, 1))), dtype=torch.float32)
-             if len(x.get('meal_timing_features', [])) > 0 else torch.zeros((5, 1))
-            ]),
+        'meal_timing_features': [torch.tensor(x.get('meal_timing_features', np.zeros((5, 1))), 
+                                              dtype=torch.float32) if len(x.get('meal_timing_features', [])) > 0 
+                                 else torch.zeros((5, 1)) for x in batch],  # New: meal timing features,
         'demographics': torch.stack([x['demographics'] for x in batch]),
-        'intensity_minute':[x['minute_intensity'] for x in batch],
-        'intensity_hour':[x['hourly_intensity'] for x in batch]
+       'intensity_minute': torch.stack([x['minute_intensity'] for x in batch]),
+       'intensity_hour': torch.stack([x['hourly_intensity'] for x in batch]),
     }
 
 

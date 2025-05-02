@@ -1,8 +1,10 @@
 from data_loader import process_multiple_subjects, get_train_test_datasets
 from utils import filter_samples_by_nutrition, custom_collate
 from torch.utils.data import DataLoader
-from Models import MultiheadAttention as TransformerEncoder, ImageEncoder, ImageSetTransformer,MultiChannelTransformerEncoder,Regressor
-from training_scripts import train_model_all_modalities
+from Models import MultiheadAttention as TransformerEncoder,ImprovedRegressor, ImageEncoder, ImageSetTransformer,MultiChannelTransformerEncoder,Regressor,IntensityCNN
+from training_scripts import train_model_all_modalities,train_model_all_modalities_cnn_heatmap,train_model_unified_timeseries
+import matplotlib.pyplot as plt
+from plotting_vizualizations import compute_modality_saliency_unified,compute_modality_saliency,plot_modality_saliency,plot_loss_curves,plot_pearson_correlation,compute_modality_saliency_encoder
 
 # summary = process_multiple_subjects(
 #     subject_ids=range(1, 50),  # Process subjects 1-49
@@ -69,7 +71,19 @@ activity_encoder = MultiChannelTransformerEncoder(
     num_layers=3
 )
 cgm_encoder = TransformerEncoder(n_features=1440, embed_dim=96, num_heads=2, num_classes=32, dropout=0.2, num_layers=3)
-meal_time_encoder = meal_time_encoder = MultiChannelTransformerEncoder(
+intensity_encoder = MultiChannelTransformerEncoder(
+    n_features=1440,  # Your sequence length
+    n_channels=1,     # Number of channels in your tensor
+    embed_dim=96,
+    num_heads=2,
+    num_classes=32,
+    dropout=0.2,
+    num_layers=3
+)
+
+
+intensityCnn = IntensityCNN(output_dim=32)
+meal_time_encoder = MultiChannelTransformerEncoder(
     n_features=1440,  # Your sequence length
     n_channels=5,     # Number of channels in your tensor
     embed_dim=96,
@@ -80,20 +94,55 @@ meal_time_encoder = meal_time_encoder = MultiChannelTransformerEncoder(
 )
 # Initialize regressor
 regressor = Regressor(
-    input_size=32+32+32+16+5,  # Sum of all embedding dimensions plus demographics
+    input_size=32+32+32+16+5+32,  # Sum of all embedding dimensions plus demographics
     hidden=128,
     output_size=1,  # Adjust based on your nutrition prediction targets
     dropout=0.2
 )
 set_transformer = ImageSetTransformer(input_dim=32, hidden_dim=128, num_heads=4, num_layers=2, dropout=0.1)
 
-for batch in train_loader:
-    print(batch['cgm_data'].shape)
-    print(batch['activity_data'].shape)
-    print(batch['meal_timing_features'].shape)
-    break
+# for batch in train_loader:
+#     print(batch['cgm_data'].shape)
+#     print(batch['activity_data'].shape)
+#     print(batch['intensity_minute'].shape)
+#     break
 # Create the final model
 #training_losses, validation_losses,pearson,_,_ = train_model(activity_encoder,cgm_encoder,meal_time_encoder,regressor,train_loader,test_loader,0,1,epochs=30,lr=1e-4)
+
+
+unified_encoder = MultiChannelTransformerEncoder(
+    n_features=1440,  # Your sequence length
+    n_channels=9,     # Number of channels in your tensor
+    embed_dim=96,
+    num_heads=4,
+    num_classes=64,
+    dropout=0.2,
+    num_layers=3
+)
+
+
+regressor = ImprovedRegressor(
+        input_size=64 + 32 + 5,  # unified_embedding + image_embedding + demographics
+        hidden_size=256,
+        output_size=1,
+        dropout=0.3
+    )
+
+training_losses, validation_losses, pearson = train_model_unified_timeseries(
+    unified_encoder=unified_encoder,
+    image_encoder=image_encoder,
+    image_set_model=set_transformer,
+    regressor=regressor,
+    train_loader=train_loader,
+    val_loader=test_loader,
+    global_mean=0,
+    global_std=1,
+    epochs=10,
+    lr=5e-4,
+    weight_decay=1e-7
+)
+
+
 
 # training_losses, validation_losses, pearson = train_model_all_modalities(
 #         activity_encoder=activity_encoder,
@@ -101,6 +150,24 @@ for batch in train_loader:
 #         meal_time_encoder=meal_time_encoder,
 #         image_encoder=image_encoder,
 #         image_set_model=set_transformer,
+#         intensity_encoder=intensity_encoder,
+#         regressor=regressor,
+#         train_loader=train_loader,
+#         val_loader=test_loader,
+#         global_mean=0,
+#         global_std=1,
+#         epochs=1,
+#         lr=1e-4
+#     )
+
+
+# training_losses, validation_losses, pearson = train_model_all_modalities_cnn_heatmap(
+#         activity_encoder=activity_encoder,
+#         cgm_encoder=cgm_encoder,
+#         meal_time_encoder=meal_time_encoder,
+#         image_encoder=image_encoder,
+#         image_set_model=set_transformer,
+#         intensity_cnn = intensityCnn,
 #         regressor=regressor,
 #         train_loader=train_loader,
 #         val_loader=test_loader,
@@ -109,3 +176,34 @@ for batch in train_loader:
 #         epochs=10,
 #         lr=1e-4
 #     )
+
+
+
+plt.figure(figsize=(12, 5))
+
+# Plot losses
+
+# Create directory if it doesn't exist
+plot_loss_curves(training_losses, validation_losses,
+                 filename='training result images/loss_allModalities_UnifiedEncoder_plot.png',
+                 title="Loss: All Modalities Unified + Intensity Encoder")
+
+plot_pearson_correlation(pearson,
+                         filename='training result images/pearson_allModalities_UnifiedEncoder_plot.png',
+                         title="Pearson Correlation: All Modalities Unified + Intensity Encoder")
+
+
+for batch in test_loader:
+    break
+
+modality_scores = compute_modality_saliency_unified(
+    unified_encoder=unified_encoder,
+    image_encoder=image_encoder,
+    image_set_model=set_transformer,
+    regressor=regressor,
+    batch =batch,
+    global_mean=0,
+    global_std=1
+)
+
+plot_modality_saliency(modality_scores, filename="training result images/saliency_allModalitiesUnified_IntensityEncoder_plot.png")
