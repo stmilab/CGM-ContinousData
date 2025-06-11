@@ -22,7 +22,6 @@ class CGMacros24HDataset(Dataset):
         cgm_trace,  # CGM features in multimendional array
         znorm_cgm,  # z-normalized CGM features
         img_arr,
-        a1c,  # A1C values
         fasting_glucose,  # fasting glucose values
         label_arr,  # macronutrient labels
         transform=None,  # transform function to apply on CGM features
@@ -30,7 +29,6 @@ class CGMacros24HDataset(Dataset):
         self.cgm_trace = cgm_trace
         self.znorm_cgm = znorm_cgm
         self.img_arr = img_arr
-        self.a1c = a1c
         self.fasting_glucose = fasting_glucose
         self.label_arr = label_arr
         self.label_cols = label_cols
@@ -57,8 +55,6 @@ class CGMacros24HDataset(Dataset):
             img_arr,
             cgm_trace,
             znorm_cgm,
-            a1c,
-            fasting_glucose,
             label_arr,
             self.label_cols,
         )
@@ -194,8 +190,6 @@ def split_dataset(
     cgm_trace: np.ndarray,
     znorm_cgm: np.ndarray,
     img_arr: np.ndarray,
-    a1c: np.ndarray,
-    fasting_glucose: np.ndarray,
     label_arr: pd.DataFrame,
     test_size: float = 0.2,
     val_size: float = 0.2,
@@ -206,15 +200,11 @@ def split_dataset(
         np.isnan(cgm_trace).any(axis=(1, 2))
         | np.isnan(znorm_cgm).any(axis=(1, 2))
         | np.isnan(img_arr).any(axis=(1, 2, 3))
-        | np.isnan(a1c).any(axis=1)
-        | np.isnan(fasting_glucose).any(axis=1)
         | np.isnan(label_arr).any(axis=1)
     )
     cgm_trace = cgm_trace[valid_idx]
     znorm_cgm = znorm_cgm[valid_idx]
     img_arr = img_arr[valid_idx]
-    a1c = a1c[valid_idx]
-    fasting_glucose = fasting_glucose[valid_idx]
     label_arr = label_arr[valid_idx]
 
     # First split into train+val and test
@@ -245,41 +235,27 @@ def split_dataset(
     val_img_arr = img_arr[val_idx]
     test_img_arr = img_arr[test_idx]
 
-    train_a1c = a1c[train_idx]
-    val_a1c = a1c[val_idx]
-    test_a1c = a1c[test_idx]
-
-    train_fasting_glucose = fasting_glucose[train_idx]
-    val_fasting_glucose = fasting_glucose[val_idx]
-    test_fasting_glucose = fasting_glucose[test_idx]
-
     train_label_arr = label_arr[train_idx]
     val_label_arr = label_arr[val_idx]
     test_label_arr = label_arr[test_idx]
 
     # Create datasets
-    train_dataset = CGMacrosDataset(
+    train_dataset = CGMacros24HDataset(
         cgm_trace=train_cgm_trace,
         znorm_cgm=train_znorm_cgm,
         img_arr=train_img_arr,
-        a1c=train_a1c,
-        fasting_glucose=train_fasting_glucose,
         label_arr=train_label_arr,
     )
-    val_dataset = CGMacrosDataset(
+    val_dataset = CGMacros24HDataset(
         cgm_trace=val_cgm_trace,
         znorm_cgm=val_znorm_cgm,
         img_arr=val_img_arr,
-        a1c=val_a1c,
-        fasting_glucose=val_fasting_glucose,
         label_arr=val_label_arr,
     )
-    test_dataset = CGMacrosDataset(
+    test_dataset = CGMacros24HDataset(
         cgm_trace=test_cgm_trace,
         znorm_cgm=test_znorm_cgm,
         img_arr=test_img_arr,
-        a1c=test_a1c,
-        fasting_glucose=test_fasting_glucose,
         label_arr=test_label_arr,
     )
     return train_dataset, val_dataset, test_dataset
@@ -310,7 +286,7 @@ def generate_CGMacrosDataset(
 ):
     all_cgm_trace = []
     all_img_data = []
-    all_label_arr = []
+    meal_event_df = pd.DataFrame()
     all_znorm_cgm = []
     for i in tqdm(
         range(1, 50, 1),
@@ -330,28 +306,32 @@ def generate_CGMacrosDataset(
         )
 
         # NOTE: Extracting macronutritient labels
-        label_arr = dataset_df.loc[valid_meal_idx][label_cols].to_numpy()
+        meal_event_series = dataset_df.loc[valid_meal_idx]
+        meal_event_series = meal_event_series.drop(columns=["Unnamed: 0"])
+        meal_event_series["PID"] = i  # Adding subject ID to the labels
+        if "METs" not in meal_event_series.columns:
+            raise ValueError(
+                "METs column is missing in the dataset. Please check the dataset structure."
+            )
 
         # NOTE: Extracting associated images
-        img_df = dataset_df.loc[valid_meal_idx][img_cols]
+        img_df = meal_event_series[img_cols]
         img_data = load_img_data(img_df, i, target_size=img_size)
 
         # NOTE: Extracting the time-series trace for each valid meal
         cgm_trace = load_cgm_trace(dataset_df, valid_meal_idx)
         znorm_cgm = normalize_each_cgm_point(cgm_trace)
         # NOTE: Extracting the a1c and fasting glucose values as array
-        a1c_arr = np.full((len(valid_meal_idx), 1), a1c)
-        fg_arr = np.full((len(valid_meal_idx), 1), fg)
         tqdm.write(
             f"Subject ID: {i}, CGM Features: {cgm_trace.shape}, "
-            f"Image Data: {img_data.shape}, Label Data: {label_arr.shape}"
+            f"Image Data: {img_data.shape}, Label Data: {meal_event_series.shape}"
         )
         all_cgm_trace.append(cgm_trace)
         all_znorm_cgm.append(znorm_cgm)
         all_img_data.append(img_data)
-        all_a1c.append(a1c_arr)
-        all_fasting_glucose.append(fg_arr)
-        all_label_arr.append(label_arr)
+        # TODO: Removing image data
+        pdb.set_trace()
+        meal_event_df = pd.concat([meal_event_df, meal_event_series])
 
     all_cgm_trace = np.concatenate(all_cgm_trace, axis=0)
     all_znorm_cgm = np.concatenate(all_znorm_cgm, axis=0)
