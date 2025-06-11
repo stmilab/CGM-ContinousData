@@ -70,6 +70,7 @@ class CGMacros24HDataset(Dataset):
         return norm_feat
 
 
+# NOTE: Not used yet, as this is 24H experiment
 def get_subject_a1c_and_fg(
     subject_id: int,
     csv_path: str = "/scratch/CGMacros/cgmacros/1.0.0/CGMacros/bio.csv",
@@ -311,8 +312,6 @@ def generate_CGMacrosDataset(
     all_img_data = []
     all_label_arr = []
     all_znorm_cgm = []
-    all_a1c = []
-    all_fasting_glucose = []
     for i in tqdm(
         range(1, 50, 1),
         desc="Processing Subjects",
@@ -320,7 +319,8 @@ def generate_CGMacrosDataset(
     ):  # IDs are from 1 to 49
         try:
             dataset_df = load_CGMacros(subject_id=i)  # loading which subject
-            a1c, fg = get_subject_a1c_and_fg(subject_id=i)
+            # NOTE: not used yet, as this is 24H experiment
+            # a1c, fg = get_subject_a1c_and_fg(subject_id=i)
         except FileNotFoundError:
             tqdm.write(f"Skipping Subject {i:03d}")
             continue
