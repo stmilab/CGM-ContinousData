@@ -58,16 +58,12 @@ def get_valid_meal_idx(
     dataset_df: pd.DataFrame,
     meal_types: list = ["breakfast", "lunch"],
     ignore_x_hours: int = 0,  # could be configured to skip first meal
-    col_names=[
-        "Meal Type",
-        "Image path",
-        "Calories",
-        "Carbs",
-        "Protein",
-        "Fat",
-        "Fiber",
-    ],  # columns to check for NaN values
+    col_names=meal_event_cols,  # columns to check for NaN values
 ) -> pd.DatetimeIndex:
+    if 'Intensity' in dataset_df.columns:
+        print(dataset_df.columns)
+    else:
+        print("Intensity column not found in dataset_df")
     # NOTE: only timestamps with valid meal types and Image paths are considered
     ts_df = copy.deepcopy(dataset_df).dropna(subset=col_names)
     # NOTE: making the all meal types lowercases
@@ -163,7 +159,7 @@ def generate_24H_CGMacros_dataset(
     save_dir: str = "/scratch/CGMacros/continous24H_dataset/",
     regenerate: bool = False,
 ):
-    if os.path.exists(f"{save_dir}cgmacros_time_series_trace.csv") or regenerate:
+    if os.path.exists(f"{save_dir}cgmacros_time_series_trace.csv") and not regenerate:
         time_series_trace_df = pd.read_csv(
             f"{save_dir}cgmacros_time_series_trace.csv", index_col=0
         )
@@ -225,7 +221,7 @@ def generate_24H_CGMacros_dataset(
 
 
 def main():
-    generate_24H_CGMacros_dataset()
+    generate_24H_CGMacros_dataset(regenerate=True)
 
 
 if __name__ == "__main__":
