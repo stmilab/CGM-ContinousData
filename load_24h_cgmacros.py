@@ -11,6 +11,9 @@ from sklearn.model_selection import train_test_split
 import cv2
 from tqdm import tqdm
 
+import warnings
+warnings.filterwarnings("ignore")
+
 meal_event_cols = [
     "Calories",
     "Carbs",
@@ -22,12 +25,12 @@ meal_event_cols = [
 ]
 time_series_cols = ["Libre GL", "Dexcom GL", "HR"]
 img_size: tuple = (112, 112)
-
-
+CGMacros_dir_path = "/scratch/CGMacros/cgmacros/anurag_corrected/CGMacros/"
+tqdm.write(CGMacros_dir_path)
 # NOTE: Not used yet, as this is 24H experiment
 def get_subject_a1c_and_fg(
     subject_id: int,
-    csv_path: str = "/scratch/CGMacros/cgmacros/1.0.0/CGMacros/bio.csv",
+    csv_path: str = f"{CGMacros_dir_path}/bio.csv",
 ) -> pd.DataFrame:
     demographics_df = pd.read_csv(csv_path, index_col=None)
     demographics_df = demographics_df[demographics_df["subject"] == subject_id]
@@ -38,17 +41,18 @@ def get_subject_a1c_and_fg(
 
 def load_CGMacros(
     subject_id: int,
-    csv_dir: str = "/scratch/CGMacros/cgmacros/1.0.0/CGMacros/",
+    csv_dir: str = CGMacros_dir_path,
 ) -> pd.DataFrame:
     if type(subject_id) != int:
-        print("subject_id should be an integer")
+        tqdm.write("subject_id should be an integer")
         raise ValueError
-    subejct_path = f"CGMacros-{subject_id:03d}/CGMacros-{subject_id:03d}.csv"
-    subject_file = os.path.join(csv_dir, subejct_path)
+    subject_path = f"CGMacros-{subject_id:03d}/CGMacros-{subject_id:03d}.csv"
+    subject_file = os.path.join(csv_dir, subject_path)
     if not os.path.exists(subject_file):
         tqdm.write(f"File {subject_file} not found")
         raise FileNotFoundError
     dataset_df = pd.read_csv(subject_file, index_col=None)
+    tqdm.write(str(sorted(dataset_df.columns)))
     dataset_df["Timestamp"] = pd.to_datetime(dataset_df["Timestamp"])
     dataset_df = dataset_df.drop("Unnamed: 0", axis=1, errors="ignore")
     return dataset_df.set_index("Timestamp")
@@ -60,10 +64,6 @@ def get_valid_meal_idx(
     ignore_x_hours: int = 0,  # could be configured to skip first meal
     col_names=meal_event_cols,  # columns to check for NaN values
 ) -> pd.DatetimeIndex:
-    if 'Intensity' in dataset_df.columns:
-        print(dataset_df.columns)
-    else:
-        print("Intensity column not found in dataset_df")
     # NOTE: only timestamps with valid meal types and Image paths are considered
     ts_df = copy.deepcopy(dataset_df).dropna(subset=col_names)
     # NOTE: making the all meal types lowercases
@@ -97,7 +97,7 @@ def get_image(
     subject_path = f"CGMacros-{subject_id:03d}/"
     img_path = f"{cgmacros_path}{subject_path}{img_filename}"
     if not os.path.exists(img_path):
-        print(f"File {img_path} not found")
+        tqdm.write(f"File {img_path} not found")
         raise FileNotFoundError
     # Loading names out
     img_data = cv2.resize(
@@ -208,15 +208,15 @@ def generate_24H_CGMacros_dataset(
         )
         meal_event_df = pd.concat([meal_event_df, meal_event_series])
 
-    print(f"All 24H Features: {time_series_trace_df.shape}")
-    print(f"All meal event Data: {meal_event_df.shape}")
+    tqdm.write(f"All 24H Features: {time_series_trace_df.shape}")
+    tqdm.write(f"All meal event Data: {meal_event_df.shape}")
     heatmap_fnames = np.array(heatmap_fnames)
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     time_series_trace_df.to_csv(f"{save_dir}cgmacros_time_series_trace.csv")
     meal_event_df.to_csv(f"{save_dir}cgmacros_meal_event.csv")
-    print(f"Saved to {save_dir}")
+    tqdm.write(f"Saved to {save_dir}")
     return time_series_trace_df, meal_event_df, heatmap_fnames
 
 
