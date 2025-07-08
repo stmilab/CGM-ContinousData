@@ -10,10 +10,25 @@ import torch
 from sklearn.model_selection import train_test_split
 import cv2
 from tqdm import tqdm
-
+import socket
 import warnings
 
 warnings.filterwarnings("ignore")
+
+
+def get_dir_path_by_hostname():
+    hostname = socket.gethostname()
+    if hostname == "vita5.engr.tamu.edu":
+        CGMacros_dir_path = "/scratch/CGMacros/cgmacros/anurag_corrected/CGMacros/"
+    elif hostname == "csce-stmi-s1.engr.tamu.edu":
+        CGMacros_dir_path = "/home/grads/a/atkulkarni/CGM-ContinousData/CGMacros-2/"
+        fitbit_dir_path = "/home/grads/a/atkulkarni/CGM-ContinousData/intensityData/"
+    else:
+        raise ValueError(f"Unknown hostname: {hostname}")
+    return CGMacros_dir_path, fitbit_dir_path
+
+
+CGMacros_dir_path, fitbit_dir_path = get_dir_path_by_hostname()
 
 meal_event_cols = [
     "Calories",
@@ -26,8 +41,6 @@ meal_event_cols = [
 ]
 time_series_cols = ["Libre GL", "Dexcom GL", "HR"]
 img_size: tuple = (112, 112)
-CGMacros_dir_path: str = "/scratch/CGMacros/cgmacros/anurag_corrected/CGMacros/"
-continuous_CGM_save_dir: str = "/scratch/CGMacros/continous24H_dataset/"
 tqdm.write(CGMacros_dir_path)
 
 
@@ -160,7 +173,7 @@ def get_subset_by_pids(
 
 
 def generate_24H_CGMacros_dataset(
-    save_dir: str = continuous_CGM_save_dir,
+    save_dir: str = "continuous24H_dataset/",
     regenerate: bool = False,
 ):
     if os.path.exists(f"{save_dir}cgmacros_time_series_trace.csv") and not regenerate:
@@ -171,14 +184,9 @@ def generate_24H_CGMacros_dataset(
             f"{save_dir}cgmacros_meal_event.csv",
             index_col=0,
         )
-        heatmap_fnames = [
-            f"{save_dir}intensity_heatmaps/subject_{i}_heatmap.png"
-            for i in range(1, 50, 1)
-        ]
-        return time_series_trace_df, meal_event_df, heatmap_fnames
+        return time_series_trace_df, meal_event_df
     time_series_trace_df = pd.DataFrame()
     meal_event_df = pd.DataFrame()
-    heatmap_fnames = [str]
     unique_subjects = [int]
     for i in tqdm(
         range(1, 50, 1),
@@ -201,8 +209,6 @@ def generate_24H_CGMacros_dataset(
         # NOTE: Extracting the time-series trace entirely
         time_series_trace_series = dataset_df[time_series_cols]
         time_series_trace_series["PID"] = i  # Adding subject ID to the labels
-        # NOTE: Attaching the filename of heatmap images
-        heatmap_fnames.append(f"{save_dir}intensity_heatmaps/subject_{i}_heatmap.png")
         tqdm.write(
             f"Subject ID: {i}, 24H Features: {time_series_trace_series}, "
             f"Label Data: {meal_event_series.shape}"
@@ -214,14 +220,13 @@ def generate_24H_CGMacros_dataset(
 
     tqdm.write(f"All 24H Features: {time_series_trace_df.shape}")
     tqdm.write(f"All meal event Data: {meal_event_df.shape}")
-    heatmap_fnames = np.array(heatmap_fnames)
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     time_series_trace_df.to_csv(f"{save_dir}cgmacros_time_series_trace.csv")
     meal_event_df.to_csv(f"{save_dir}cgmacros_meal_event.csv")
     tqdm.write(f"Saved to {save_dir}")
-    return time_series_trace_df, meal_event_df, heatmap_fnames
+    return time_series_trace_df, meal_event_df
 
 
 def main():
