@@ -12,6 +12,7 @@ import cv2
 from tqdm import tqdm
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 meal_event_cols = [
@@ -25,8 +26,11 @@ meal_event_cols = [
 ]
 time_series_cols = ["Libre GL", "Dexcom GL", "HR"]
 img_size: tuple = (112, 112)
-CGMacros_dir_path = "/scratch/CGMacros/cgmacros/anurag_corrected/CGMacros/"
+CGMacros_dir_path: str = "/scratch/CGMacros/cgmacros/anurag_corrected/CGMacros/"
+continuous_CGM_save_dir: str = "/scratch/CGMacros/continous24H_dataset/"
 tqdm.write(CGMacros_dir_path)
+
+
 # NOTE: Not used yet, as this is 24H experiment
 def get_subject_a1c_and_fg(
     subject_id: int,
@@ -92,7 +96,7 @@ def get_image(
     img_filename: str,
     subject_id: int,
     target_size: tuple,
-    cgmacros_path: str = "/scratch/CGMacros/cgmacros/1.0.0/CGMacros/",
+    cgmacros_path: str = CGMacros_dir_path,
 ) -> np.ndarray:
     subject_path = f"CGMacros-{subject_id:03d}/"
     img_path = f"{cgmacros_path}{subject_path}{img_filename}"
@@ -156,7 +160,7 @@ def get_subset_by_pids(
 
 
 def generate_24H_CGMacros_dataset(
-    save_dir: str = "/scratch/CGMacros/continous24H_dataset/",
+    save_dir: str = continuous_CGM_save_dir,
     regenerate: bool = False,
 ):
     if os.path.exists(f"{save_dir}cgmacros_time_series_trace.csv") and not regenerate:
