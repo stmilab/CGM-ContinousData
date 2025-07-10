@@ -23,12 +23,13 @@ def get_dir_path_by_hostname():
     elif hostname == "csce-stmi-s1.engr.tamu.edu":
         CGMacros_dir_path = "/home/grads/a/atkulkarni/CGM-ContinousData/CGMacros-2/"
         fitbit_dir_path = "/home/grads/a/atkulkarni/CGM-ContinousData/intensityData/"
+        save_24h_dir = "continuous24H_dataset/"
     else:
         raise ValueError(f"Unknown hostname: {hostname}")
-    return CGMacros_dir_path, fitbit_dir_path
+    return CGMacros_dir_path, fitbit_dir_path, save_24h_dir
 
 
-CGMacros_dir_path, fitbit_dir_path = get_dir_path_by_hostname()
+CGMacros_dir_path, fitbit_dir_path, save_24h_dir = get_dir_path_by_hostname()
 
 meal_event_cols = [
     "Calories",
@@ -39,7 +40,7 @@ meal_event_cols = [
     "Image path",
     "Meal Type",
 ]
-time_series_cols = ["Libre GL", "Dexcom GL", "HR"]
+time_series_cols = ["Libre GL", "Dexcom GL", "HR", "Intensity"]
 img_size: tuple = (112, 112)
 tqdm.write(CGMacros_dir_path)
 
@@ -172,8 +173,23 @@ def get_subset_by_pids(
     return trace, events, fnames
 
 
+def reset_to_fixed_date(df, fixed_date="2000-01-01"):
+    # Ensure index is datetime
+    if not pd.api.types.is_datetime64_any_dtype(df.index):
+        df.index = pd.to_datetime(df.index)
+    # Extract time-of-day
+    time_only = df.index.time
+    # Combine with fixed date
+    fixed_datetimes = pd.to_datetime(fixed_date) + pd.to_timedelta(
+        [f"{t.hour}:{t.minute}:{t.second}" for t in time_only]
+    )
+    df = df.copy()
+    df.index = fixed_datetimes
+    return df
+
+
 def generate_24H_CGMacros_dataset(
-    save_dir: str = "continuous24H_dataset/",
+    save_dir: str = save_24h_dir,
     regenerate: bool = False,
 ):
     if os.path.exists(f"{save_dir}cgmacros_time_series_trace.csv") and not regenerate:
@@ -195,6 +211,24 @@ def generate_24H_CGMacros_dataset(
     ):  # IDs are from 1 to 49
         try:
             dataset_df = load_CGMacros(subject_id=i)  # loading which subject
+            fitbit_subdir = f"CaM01-{i:03d}/Fitbit_CaM01-{i:03d}/Intensity/"
+            fitbit_dir = os.path.join(fitbit_dir_path, fitbit_subdir)
+            fs = os.listdir(fitbit_dir)
+            fitbit_file = [f for f in fs if "minuteIntensitiesNarrow" in f][0]
+            fitbit_df = pd.read_csv(
+                os.path.join(fitbit_dir, fitbit_file), index_col=None
+            )
+            fitbit_df["ActivityMinute"] = pd.to_datetime(fitbit_df["ActivityMinute"])
+            fitbit_df.set_index("ActivityMinute", inplace=True)
+            # Reset both dataframes to same fake date
+            dataset_df_fixed = reset_to_fixed_date(dataset_df)
+            fitbit_df_fixed = reset_to_fixed_date(fitbit_df)
+            print(fitbit_df_fixed.head())
+            print(dataset_df_fixed.head())
+            dataset_df = dataset_df.merge(
+                fitbit_df[["Intensity"]], left_index=True, right_index=True, how="left"
+            )
+            pdb.set_trace()  # Debugging point to check the dataset_df
         except FileNotFoundError:
             tqdm.write(f"Skipping Subject {i:03d}")
             continue
@@ -210,7 +244,8 @@ def generate_24H_CGMacros_dataset(
         time_series_trace_series = dataset_df[time_series_cols]
         time_series_trace_series["PID"] = i  # Adding subject ID to the labels
         tqdm.write(
-            f"Subject ID: {i}, 24H Features: {time_series_trace_series}, "
+            f"Subject ID: {i}\n"
+            f"24H Features: {time_series_trace_series.head()}\n"
             f"Label Data: {meal_event_series.shape}"
         )
         time_series_trace_df = pd.concat(
