@@ -177,14 +177,17 @@ def reset_to_fixed_date(df, fixed_date="2000-01-01"):
     # Ensure index is datetime
     if not pd.api.types.is_datetime64_any_dtype(df.index):
         df.index = pd.to_datetime(df.index)
-    # Extract time-of-day
-    time_only = df.index.time
-    # Combine with fixed date
-    fixed_datetimes = pd.to_datetime(fixed_date) + pd.to_timedelta(
-        [f"{t.hour}:{t.minute}:{t.second}" for t in time_only]
+    # Get the time part of the first timestamp
+    first_time = df.index[0].time()
+    # Combine fixed_date with the time from the first timestamp
+    fixed_datetime = pd.to_datetime(fixed_date) + pd.Timedelta(
+        hours=first_time.hour, minutes=first_time.minute, seconds=first_time.second
     )
+    # Calculate the time difference between the first timestamp and the fixed datetime
+    time_diff = df.index[0] - fixed_datetime
+    # Shift the index so that the first timestamp aligns with the fixed datetime
     df = df.copy()
-    df.index = fixed_datetimes
+    df.index = df.index - time_diff
     return df
 
 
@@ -221,21 +224,20 @@ def generate_24H_CGMacros_dataset(
             fitbit_df["ActivityMinute"] = pd.to_datetime(fitbit_df["ActivityMinute"])
             fitbit_df.set_index("ActivityMinute", inplace=True)
             # Reset both dataframes to same fake date
-            dataset_df_fixed = reset_to_fixed_date(dataset_df)
-            fitbit_df_fixed = reset_to_fixed_date(fitbit_df)
-            print(fitbit_df_fixed.head())
-            print(dataset_df_fixed.head())
+            dataset_df = reset_to_fixed_date(dataset_df)
+            fitbit_df = reset_to_fixed_date(fitbit_df)
             dataset_df = dataset_df.merge(
                 fitbit_df[["Intensity"]], left_index=True, right_index=True, how="left"
             )
-            pdb.set_trace()  # Debugging point to check the dataset_df
         except FileNotFoundError:
             tqdm.write(f"Skipping Subject {i:03d}")
             continue
         unique_subjects.append(i)
         # NOTE: getting the list of timestamps of valid meals
         valid_meal_idx = get_valid_meal_idx(
-            dataset_df, meal_types=["breakfast"], ignore_x_hours=0
+            dataset_df,
+            meal_types=["Breakfast", "Lunch", "Dinner", "Snacks"],
+            ignore_x_hours=0,
         )
         # NOTE: Extracting macronutritient labels
         meal_event_series = dataset_df.loc[valid_meal_idx][meal_event_cols]
@@ -245,7 +247,7 @@ def generate_24H_CGMacros_dataset(
         time_series_trace_series["PID"] = i  # Adding subject ID to the labels
         tqdm.write(
             f"Subject ID: {i}\n"
-            f"24H Features: {time_series_trace_series.head()}\n"
+            f"{time_series_trace_series.head(2)}\n"
             f"Label Data: {meal_event_series.shape}"
         )
         time_series_trace_df = pd.concat(
