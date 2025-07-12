@@ -11,6 +11,13 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.linear_model import LinearRegression
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    f1_score,
+)
 
 
 def get_wakeup_idx(intensity_series):
@@ -19,7 +26,7 @@ def get_wakeup_idx(intensity_series):
         intensity_series.index.time <= pd.to_datetime("10:00").time()
     )
     morning_intensity = intensity_series[mask]
-    candidate_idx = morning_intensity[morning_intensity == morning_intensity.max()]
+    candidate_idx = morning_intensity[morning_intensity != morning_intensity.min()]
     wakeup_idx = (
         candidate_idx.index[0]
         if not candidate_idx.empty
@@ -31,6 +38,18 @@ def get_wakeup_idx(intensity_series):
 def get_avg_biomarker_until_wakeup(group, wakeup_idx, col_name):
     biomarker = group[col_name].dropna()
     biomarker_until_wakeup = biomarker.loc[:wakeup_idx]
+    return biomarker_until_wakeup.mean() if not biomarker_until_wakeup.empty else np.nan
+
+
+def get_avg_sleep_biomarker_until_wakeup(group, col_name):
+    sleep = group[col_name]
+    # Sleep is when sleep_value is not NaN
+    sleep_period = sleep[sleep.notna()]
+    if sleep_period.empty:
+        return np.nan
+    # Find the last sleep index (i.e., just before wake)
+    wakeup_idx = sleep_period.index[-1]
+    biomarker_until_wakeup = group.loc[:wakeup_idx, col_name].dropna()
     return biomarker_until_wakeup.mean() if not biomarker_until_wakeup.empty else np.nan
 
 
@@ -54,9 +73,12 @@ def estimate_daily_fasting_biomarkers(ts_df: pd.DataFrame) -> pd.DataFrame:
         if wakeup_idx is None:
             tqdm.write(f"No fasting intensity found for PID:{pid} {date}, skipping...")
             continue
-        avg_libre = get_avg_biomarker_until_wakeup(group, wakeup_idx, "Libre GL")
-        avg_dexcom = get_avg_biomarker_until_wakeup(group, wakeup_idx, "Dexcom GL")
-        avg_HR = get_avg_biomarker_until_wakeup(group, wakeup_idx, "HR")
+        # avg_libre = get_avg_biomarker_until_wakeup(group, wakeup_idx, "Libre GL")
+        # avg_dexcom = get_avg_biomarker_until_wakeup(group, wakeup_idx, "Dexcom GL")
+        # avg_HR = get_avg_biomarker_until_wakeup(group, wakeup_idx, "HR")
+        avg_libre = get_avg_sleep_biomarker_until_wakeup(group, "Libre GL")
+        avg_dexcom = get_avg_sleep_biomarker_until_wakeup(group, "Dexcom GL")
+        avg_HR = get_avg_sleep_biomarker_until_wakeup(group, "HR")
         results.append(
             {
                 "date": pd.to_datetime(date),
@@ -104,27 +126,96 @@ def estimate_dining_periods(ts_df: pd.DataFrame, meal_df) -> pd.DataFrame:
 
     results = []
     for date, group in ts_df.groupby(ts_df.index.date):
-        # Calculate AUC for each hour in this day
-        auc_per_hour = []
-        for hour_start, hour_group in group.groupby(group.index.floor("H")):
-            values = hour_group["Libre GL"].dropna()
+        # Calculate AUC for each 15-minute interval in this day
+        auc_per_15min = []
+        for interval_start, interval_group in group.groupby(group.index.floor("15T")):
+            values = interval_group["Libre GL"].dropna()
             if len(values) > 1:
                 auc = np.trapz(values, dx=1)
             else:
                 auc = 0
-            auc_per_hour.append((hour_start, auc))
-        # Get top 10 hours by AUC
-        top_10 = sorted(auc_per_hour, key=lambda x: x[1], reverse=True)[:10]
-        top_10_df = pd.DataFrame(top_10, columns=["hour", "auc"])
-        top_10_df.set_index("hour", inplace=True)
-        top_10_df.sort_index(inplace=True)
-        daily_top10_auc_sum = sum(auc for _, auc in top_10)
+            auc_per_15min.append((interval_start, auc))
+        # Compute the average AUC across all 15-minute intervals
+        if auc_per_15min:
+            avg_auc = np.mean([auc for _, auc in auc_per_15min])
+        else:
+            avg_auc = 0
         results.append(
             {
                 "date": pd.to_datetime(date),
-                "top10_auc_sum": daily_top10_auc_sum,
+                "top10_avg_auc": avg_auc // 10,
             }
         )
+    result_df = pd.DataFrame(results).set_index("date")
+    return result_df
+
+
+def estimate_dining_periods_accuracy(
+    ts_df: pd.DataFrame,
+    meal_df,
+    interval: str = "15T",
+    top_n: int = 10,
+    meal_window_hours: float = 3.0,
+) -> pd.DataFrame:
+    """
+    Estimate dining periods accuracy by comparing top-N AUC intervals to meal times.
+
+    Args:
+        ts_df (pd.DataFrame): Time series dataframe.
+        meal_df (pd.DataFrame): Meal dataframe.
+        interval (str): Interval for grouping (e.g., '15T', '1H').
+        top_n (int): Number of top intervals to consider.
+        meal_window_hours (float): Window (in hours) after meal time to consider as aligned.
+
+    Returns:
+        pd.DataFrame: Results with alignment info.
+    """
+    ts_df = ts_df.copy()
+    if not isinstance(ts_df.index, pd.DatetimeIndex):
+        ts_df.index = pd.to_datetime(ts_df.index)
+
+    results = []
+    for date, group in ts_df.groupby(ts_df.index.date):
+        # Calculate AUC for each interval in this day
+        auc_per_interval = []
+        for interval_start, interval_group in group.groupby(
+            group.index.floor(interval)
+        ):
+            values = interval_group["Libre GL"].dropna()
+            if len(values) > 1:
+                auc = np.trapz(values, dx=1)
+            else:
+                auc = 0
+            auc_per_interval.append((interval_start, auc))
+        # Sort by AUC descending and take top N
+        auc_per_interval_sorted = sorted(
+            auc_per_interval, key=lambda x: x[1], reverse=True
+        )[:top_n]
+        # Prepare meal times for this date (+window)
+        if meal_df is not None and not meal_df.empty:
+            meal_times = meal_df.index
+        else:
+            meal_times = pd.to_datetime([])
+        for interval_start, auc in auc_per_interval_sorted:
+            aligned = False
+            for meal_time in meal_times:
+                if (
+                    meal_time
+                    <= interval_start
+                    <= meal_time + pd.Timedelta(hours=meal_window_hours)
+                ):
+                    aligned = True
+                    break
+            if meal_times.date not in meal_df.index.date:
+                aligned = True
+            results.append(
+                {
+                    "date": pd.to_datetime(date),
+                    "interval_start": interval_start,
+                    "auc": auc,
+                    "align_with_dining_time": aligned,
+                }
+            )
     result_df = pd.DataFrame(results).set_index("date")
     return result_df
 
@@ -176,7 +267,7 @@ def data_split(merged_df, test_size=0.2, random_state=2025, approach="per person
         "avg_fasting_libre",
         "avg_fasting_dexcom",
         "avg_fasting_HR",
-        "top10_auc_sum",
+        "top10_avg_iauc",
     ]
     labels = ["total_calories", "total_carbs", "total_ratio"]
     return train_df[features], test_df[features], train_df[labels], test_df[labels]
@@ -230,14 +321,28 @@ def main():
     ts_df.index = pd.to_datetime(ts_df.index)
     meal_df.index = pd.to_datetime(meal_df.index)
     merged_df = pd.DataFrame()
+    dining_windows_align_df = pd.DataFrame()
     for pid in ts_df["PID"].unique():
         pid_fasting_df = estimate_daily_fasting_biomarkers(ts_df[ts_df["PID"] == pid])
         pid_daily_intakes_df = calc_daily_intakes(meal_df[meal_df["PID"] == pid])
+        pid_dining_windows_df = estimate_dining_periods_accuracy(
+            ts_df[ts_df["PID"] == pid],
+            meal_df[meal_df["PID"] == pid],
+            interval="1H",
+            top_n=10,
+            meal_window_hours=3,
+        )
+        dining_windows_align_df = pd.concat(
+            [dining_windows_align_df, pid_dining_windows_df], axis=0
+        )
         pid_dining_df = estimate_dining_periods(
             ts_df[ts_df["PID"] == pid], meal_df[meal_df["PID"] == pid]
         )
         pid_merged_df = pid_fasting_df.join(
             [pid_daily_intakes_df, pid_dining_df], how="inner"
+        )
+        pid_merged_df["top10_avg_iauc"] = (
+            pid_merged_df["top10_avg_auc"] - pid_merged_df["avg_fasting_libre"]
         )
         merged_df = pd.concat([merged_df, pid_merged_df], axis=0)
     # Drop rows with missing targets
@@ -246,7 +351,7 @@ def main():
     )
 
     # Train/test split
-    split_approach = "random"  # ["random", "per person", "per date"]
+    split_approach = "per date"  # ["random", "per person", "per date"]
     X_train, X_test, y_train, y_test = data_split(merged_df, approach=split_approach)
 
     # NOTE: Try with Linear Regression
@@ -281,6 +386,13 @@ def main():
         f"NRMSE {list(y_test.columns)}:",
         [round(v, 3) for v in nrmse],
     )
+
+    # NOTE: Measuring how much agreement
+    # Calculate agreement metrics for dining window alignmen
+    align_arr = dining_windows_align_df["align_with_dining_time"].to_numpy()
+    # Here, we compare to a baseline where we always predict "aligned" (1)
+    accuracy = align_arr.sum() / len(align_arr)
+    print(f"Dining window alignment: accuracy={accuracy:.3f}")
     pdb.set_trace()
 
 

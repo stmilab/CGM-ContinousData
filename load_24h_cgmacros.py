@@ -40,7 +40,7 @@ meal_event_cols = [
     "Image path",
     "Meal Type",
 ]
-time_series_cols = ["Libre GL", "Dexcom GL", "HR", "METs"]
+time_series_cols = ["Libre GL", "Dexcom GL", "HR", "METs", "sleep_value"]
 img_size: tuple = (112, 112)
 tqdm.write(CGMacros_dir_path)
 
@@ -214,23 +214,34 @@ def generate_24H_CGMacros_dataset(
     ):  # IDs are from 1 to 49
         try:
             dataset_df = load_CGMacros(subject_id=i)  # loading which subject
-            # NOTE: Resetting
-            fitbit_subdir = f"CaM01-{i:03d}/Fitbit_CaM01-{i:03d}/Intensity/"
-            fitbit_dir = os.path.join(fitbit_dir_path, fitbit_subdir)
-            fs = os.listdir(fitbit_dir)
-            fitbit_file = [f for f in fs if "minuteMETsNarrow" in f][0]
-            fitbit_df = pd.read_csv(
-                os.path.join(fitbit_dir, fitbit_file), index_col=None
-            )
-            fitbit_df["ActivityMinute"] = pd.to_datetime(fitbit_df["ActivityMinute"])
-            fitbit_df.set_index("ActivityMinute", inplace=True)
+            # NOTE: Merging Fitbit METs data
+            fitbit_intensity_subdir = f"CaM01-{i:03d}/Fitbit_CaM01-{i:03d}/Intensity/"
+            mets_dir = os.path.join(fitbit_dir_path, fitbit_intensity_subdir)
+            mets_files = os.listdir(mets_dir)
+            mets_file = [f for f in mets_files if "minuteMETsNarrow" in f][0]
+            mets_df = pd.read_csv(os.path.join(mets_dir, mets_file), index_col=None)
+            mets_df["ActivityMinute"] = pd.to_datetime(mets_df["ActivityMinute"])
+            mets_df.set_index("ActivityMinute", inplace=True)
+            # NOTE: Merging the Fitbit Sleepp data
+            fitbit_sleep_subdir = f"CaM01-{i:03d}/Fitbit_CaM01-{i:03d}/Sleep/"
+            sleep_dir = os.path.join(fitbit_dir_path, fitbit_sleep_subdir)
+            sleep_files = os.listdir(sleep_dir)
+            sleep_file = [f for f in sleep_files if "minuteSleep" in f][0]
+            sleep_df = pd.read_csv(os.path.join(sleep_dir, sleep_file), index_col=None)
+            sleep_df["date"] = pd.to_datetime(sleep_df["date"])
+            sleep_df.set_index("date", inplace=True)
+            sleep_df = sleep_df.rename(columns={"value": "sleep_value"})
             if "METs" in dataset_df.columns:
                 dataset_df = dataset_df.drop(columns=["METs"])
             # Reset both dataframes to same fake date
-            dataset_df = reset_to_fixed_date(dataset_df)
-            fitbit_df = reset_to_fixed_date(fitbit_df)
+            dataset_df = reset_to_fixed_date(
+                dataset_df, fixed_date=mets_df.index.date[0]
+            )
             dataset_df = dataset_df.merge(
-                fitbit_df[["METs"]], left_index=True, right_index=True, how="left"
+                mets_df[["METs"]], left_index=True, right_index=True, how="left"
+            )
+            dataset_df = dataset_df.merge(
+                sleep_df[["sleep_value"]], left_index=True, right_index=True, how="left"
             )
         except FileNotFoundError:
             tqdm.write(f"Skipping Subject {i:03d}")
