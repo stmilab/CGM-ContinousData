@@ -40,7 +40,7 @@ meal_event_cols = [
     "Image path",
     "Meal Type",
 ]
-time_series_cols = ["Libre GL", "Dexcom GL", "HR", "Intensity"]
+time_series_cols = ["Libre GL", "Dexcom GL", "HR", "METs"]
 img_size: tuple = (112, 112)
 tqdm.write(CGMacros_dir_path)
 
@@ -214,20 +214,23 @@ def generate_24H_CGMacros_dataset(
     ):  # IDs are from 1 to 49
         try:
             dataset_df = load_CGMacros(subject_id=i)  # loading which subject
+            # NOTE: Resetting
             fitbit_subdir = f"CaM01-{i:03d}/Fitbit_CaM01-{i:03d}/Intensity/"
             fitbit_dir = os.path.join(fitbit_dir_path, fitbit_subdir)
             fs = os.listdir(fitbit_dir)
-            fitbit_file = [f for f in fs if "minuteIntensitiesNarrow" in f][0]
+            fitbit_file = [f for f in fs if "minuteMETsNarrow" in f][0]
             fitbit_df = pd.read_csv(
                 os.path.join(fitbit_dir, fitbit_file), index_col=None
             )
             fitbit_df["ActivityMinute"] = pd.to_datetime(fitbit_df["ActivityMinute"])
             fitbit_df.set_index("ActivityMinute", inplace=True)
+            if "METs" in dataset_df.columns:
+                dataset_df = dataset_df.drop(columns=["METs"])
             # Reset both dataframes to same fake date
             dataset_df = reset_to_fixed_date(dataset_df)
             fitbit_df = reset_to_fixed_date(fitbit_df)
             dataset_df = dataset_df.merge(
-                fitbit_df[["Intensity"]], left_index=True, right_index=True, how="left"
+                fitbit_df[["METs"]], left_index=True, right_index=True, how="left"
             )
         except FileNotFoundError:
             tqdm.write(f"Skipping Subject {i:03d}")
