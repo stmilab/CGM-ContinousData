@@ -46,7 +46,7 @@ def estimate_daily_fasting_biomarkers(ts_df: pd.DataFrame) -> pd.DataFrame:
     for date, group in ts_df.groupby(ts_df.index.date):
         # Find first fasting for Libre GL
 
-        intensity = group["Intensity"].dropna()
+        intensity = group["METs"].dropna()
         if intensity.empty:
             tqdm.write(f"No intensity data available for PID:{pid} {date}, skipping...")
             continue  # Skip if no intensity data available
