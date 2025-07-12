@@ -96,7 +96,7 @@ def calc_daily_intakes(meal_df: pd.DataFrame) -> pd.DataFrame:
     return daily_intakes
 
 
-def estimate_dining_periods(ts_df: pd.DataFrame) -> pd.DataFrame:
+def estimate_dining_periods(ts_df: pd.DataFrame, meal_df) -> pd.DataFrame:
     # Ensure datetime index
     ts_df = ts_df.copy()
     if not isinstance(ts_df.index, pd.DatetimeIndex):
@@ -115,6 +115,9 @@ def estimate_dining_periods(ts_df: pd.DataFrame) -> pd.DataFrame:
             auc_per_hour.append((hour_start, auc))
         # Get top 10 hours by AUC
         top_10 = sorted(auc_per_hour, key=lambda x: x[1], reverse=True)[:10]
+        top_10_df = pd.DataFrame(top_10, columns=["hour", "auc"])
+        top_10_df.set_index("hour", inplace=True)
+        top_10_df.sort_index(inplace=True)
         daily_top10_auc_sum = sum(auc for _, auc in top_10)
         results.append(
             {
@@ -224,11 +227,15 @@ def train_and_predict(
 
 def main():
     ts_df, meal_df = generate_24H_CGMacros_dataset()
+    ts_df.index = pd.to_datetime(ts_df.index)
+    meal_df.index = pd.to_datetime(meal_df.index)
     merged_df = pd.DataFrame()
     for pid in ts_df["PID"].unique():
         pid_fasting_df = estimate_daily_fasting_biomarkers(ts_df[ts_df["PID"] == pid])
         pid_daily_intakes_df = calc_daily_intakes(meal_df[meal_df["PID"] == pid])
-        pid_dining_df = estimate_dining_periods(ts_df[ts_df["PID"] == pid])
+        pid_dining_df = estimate_dining_periods(
+            ts_df[ts_df["PID"] == pid], meal_df[meal_df["PID"] == pid]
+        )
         pid_merged_df = pid_fasting_df.join(
             [pid_daily_intakes_df, pid_dining_df], how="inner"
         )
@@ -274,6 +281,7 @@ def main():
         f"NRMSE {list(y_test.columns)}:",
         [round(v, 3) for v in nrmse],
     )
+    pdb.set_trace()
 
 
 if __name__ == "__main__":
