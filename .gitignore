@@ -133,3 +133,5 @@ cython_debug/
 .vscode/
 
 # Custom ones 
+*.csv
+*.png
