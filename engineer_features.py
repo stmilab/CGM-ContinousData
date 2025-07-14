@@ -67,11 +67,11 @@ def estimate_daily_fasting_biomarkers(ts_df: pd.DataFrame) -> pd.DataFrame:
 
         intensity = group["METs"].dropna()
         if intensity.empty:
-            tqdm.write(f"No intensity data available for PID:{pid} {date}, skipping...")
+            # tqdm.write(f"No intensity data available for PID:{pid} {date}, skipping...")
             continue  # Skip if no intensity data available
         wakeup_idx = get_wakeup_idx(intensity)
         if wakeup_idx is None:
-            tqdm.write(f"No fasting intensity found for PID:{pid} {date}, skipping...")
+            # tqdm.write(f"No fasting intensity found for PID:{pid} {date}, skipping...")
             continue
         # avg_libre = get_avg_biomarker_until_wakeup(group, wakeup_idx, "Libre GL")
         # avg_dexcom = get_avg_biomarker_until_wakeup(group, wakeup_idx, "Dexcom GL")
@@ -316,7 +316,7 @@ def train_and_predict(
     return y_scaler.inverse_transform(model.predict(X_test))
 
 
-def main():
+def main(interval="15T", top_n=5):
     ts_df, meal_df = generate_24H_CGMacros_dataset()
     ts_df.index = pd.to_datetime(ts_df.index)
     meal_df.index = pd.to_datetime(meal_df.index)
@@ -328,8 +328,8 @@ def main():
         pid_dining_windows_df = estimate_dining_periods_accuracy(
             ts_df[ts_df["PID"] == pid],
             meal_df[meal_df["PID"] == pid],
-            interval="1H",
-            top_n=10,
+            interval=interval,
+            top_n=top_n,
             meal_window_hours=3,
         )
         dining_windows_align_df = pd.concat(
@@ -391,10 +391,14 @@ def main():
     # Calculate agreement metrics for dining window alignmen
     align_arr = dining_windows_align_df["align_with_dining_time"].to_numpy()
     # Here, we compare to a baseline where we always predict "aligned" (1)
-    accuracy = align_arr.sum() / len(align_arr)
-    print(f"Dining window alignment: accuracy={accuracy:.3f}")
+    accuracy = align_arr.sum() / len(align_arr) * 100
+    print(f"Dining window alignment: accuracy={accuracy:.2f}%")
     pdb.set_trace()
 
 
 if __name__ == "__main__":
     main()
+    # for top_n in [15, 20, 60]:
+    #     for interval in ["15T", "30T", "45T", "1H"]:
+    #         main(interval=interval, top_n=top_n)
+    #         print(f"Above it interval={interval}, top_n={top_n}")
